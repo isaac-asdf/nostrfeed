@@ -5,3 +5,4 @@ edition = "2021"
 
 [dependencies]
 nostr-sdk = "0.37.0"
+tokio = "1.42.0"
