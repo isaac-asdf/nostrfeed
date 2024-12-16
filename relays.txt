@@ -1,0 +1,3 @@
+wss://nostr.oxtr.dev
+wss://relay.damus.io
+wss://nostr.openchain.fr
