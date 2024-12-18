@@ -15,19 +15,19 @@ async fn main() -> Result<()> {
     // let client = Client::default();
 
     add_relays(&client).await.unwrap();
-
-    let keys = get_keys();
-    let admins = get_admins();
+    // Connect to relays
+    client.connect().await;
 
     let (sender, receiver) = channel::<Event>();
 
+    let npubs = get_npubs();
     let sub_notes = Filter::new()
-        .authors(keys)
+        .authors(npubs)
         .kind(Kind::TextNote)
         .since(Timestamp::min());
 
-    let sub_admin = Filter::new()
-        .authors(admins.clone())
+    let admins = get_admins();
+    let _sub_admin = Filter::new() //     .authors(admins.clone())
         .kinds(vec![
             Kind::PrivateDirectMessage,
             Kind::EncryptedDirectMessage,
@@ -35,16 +35,14 @@ async fn main() -> Result<()> {
         .since(Timestamp::now());
 
     // Subscribe (auto generate subscription ID)
-    let Output { .. } = client.subscribe(vec![sub_notes], None).await.unwrap();
+    let Output { .. } = client.subscribe(vec![sub_notes], None).await?;
 
     // Spawn off an expensive computation
-    println!("spawning");
     thread::spawn(move || {
         handle_events(receiver, admins);
     });
 
     // Handle subscription notifications with `handle_notifications` method
-    println!("starting sub");
     client
         .handle_notifications(|notification| async {
             if let RelayPoolNotification::Event { event, .. } = notification {
@@ -64,7 +62,7 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-fn handle_events(receiver: Receiver<Event>, admins: Vec<PublicKey>) {
+fn handle_events(_receiver: Receiver<Event>, _admins: Vec<PublicKey>) {
     // todo
     println!("Waiting for events");
     loop {}
@@ -80,7 +78,7 @@ async fn add_relays(client: &Client) -> Result<()> {
     Ok(())
 }
 
-fn get_keys() -> Vec<PublicKey> {
+fn get_npubs() -> Vec<PublicKey> {
     let mut f = std::fs::File::open("./npubs.txt").unwrap();
     let mut keys = String::new();
     f.read_to_string(&mut keys).unwrap();
