@@ -1,10 +1,12 @@
 [package]
+name = "MN_DVM"
 about = "A DVM for highlighting the MN nostr community"
 lnurl = "bravecheeta9@primal.net"
 # If nsec isn't present, a new nsec will be generated
 nsec = "3bd0a7f5ab788d086dd2fea661916597ff1c251e028a25fcbaea2a3f531f08d5"
 # Set to true internally after a 31990 is sent out
 announced = false
+random_id = "1x2vw03u6vp9jf5v9uh6"
 
 [comms]
 relays = [

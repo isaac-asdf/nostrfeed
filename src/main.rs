@@ -19,10 +19,12 @@ struct Config {
 
 #[derive(Debug, Deserialize, Serialize)]
 struct Package {
+    name: String,
     about: String,
     lnurl: String,
     nsec: Option<String>,
     announced: bool,
+    random_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -35,8 +37,9 @@ struct Comms {
 #[tokio::main]
 async fn main() -> Result<()> {
     // get config
-    let config = get_config();
-    let keys: Keys = Keys::parse(&config.package.nsec.expect("nsec generation error")).unwrap();
+    let mut config = get_config();
+    let keyopt = config.package.nsec.clone();
+    let keys: Keys = Keys::parse(keyopt.expect("nsec generation error")).unwrap();
     let npubs = get_npubs(&config.comms.npubs);
     let admins = get_admins(&config.comms.npubs);
     let client = Client::new(keys.clone());
@@ -44,7 +47,11 @@ async fn main() -> Result<()> {
     client.connect().await;
 
     // verify we have announced
-    if !config.package.announced {}
+    if !config.package.announced {
+        announce_me(&config, &client).await;
+        config.package.announced = true;
+        save_config(&config);
+    }
 
     println!("Find me at: {}", keys.public_key().to_bech32()?);
 
@@ -135,6 +142,20 @@ fn handle_cmd(_event: Event, _client: &Client) {
     // unimplemented
 }
 
+async fn announce_me(config: &Config, client: &Client) {
+    use serde_json::json;
+    let content = json!({"name": config.package.name, "about" : config.package.about, "encryptionSupported": false})
+        .to_string();
+    let tag_k = Tag::parse(["k", "5300"]).unwrap();
+    let dval = config.package.random_id.clone();
+    let tag_d = Tag::parse(["d", &dval.unwrap()]).unwrap();
+    let signer = client.signer().await.unwrap();
+    let ev = EventBuilder::new(DVM_ADVERT, content)
+        .tags([tag_k, tag_d])
+        .sign(&signer);
+    let ev = ev.await.unwrap();
+    client.send_event(ev).await;
+}
 fn get_config() -> Config {
     let mut f = std::fs::File::open(CONFIGSTR).unwrap();
     let mut filestr = String::new();
@@ -143,6 +164,16 @@ fn get_config() -> Config {
     if config.package.nsec.is_none() {
         let keys = Keys::generate();
         config.package.nsec = Some(keys.secret_key().to_secret_hex());
+        save_config(&config);
+    }
+    if config.package.random_id.is_none() {
+        let mut randid = Keys::generate()
+            .public_key
+            .to_bech32()
+            .expect("keygen err")
+            .replace("npub", "");
+        randid.truncate(20);
+        config.package.random_id = Some(randid);
         save_config(&config);
     }
     config
@@ -168,4 +199,18 @@ fn get_admins(admins: &Vec<String>) -> Vec<PublicKey> {
         .iter()
         .map(|pubkey| PublicKey::parse(pubkey).unwrap())
         .collect::<Vec<PublicKey>>()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn tconfig() {
+        let config = get_config();
+        let keyopt = config.package.nsec.clone();
+        let keys: Keys = Keys::parse(keyopt.expect("nsec generation error")).unwrap();
+        let client = Client::new(keys.clone());
+        announce_me(&config, &client).await;
+    }
 }

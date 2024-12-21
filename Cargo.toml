@@ -7,5 +7,6 @@ edition = "2021"
 futures = "0.3.30"
 nostr-sdk = { version = "0.37.0", features = ["nip04"] }
 serde = "1.0.216"
+serde_json = "1.0.133"
 tokio = "1.42.0"
 toml = "0.8.19"

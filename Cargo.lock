@@ -930,6 +930,7 @@ dependencies = [
  "futures",
  "nostr-sdk",
  "serde",
+ "serde_json",
  "tokio",
  "toml",
 ]
