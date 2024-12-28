@@ -3,7 +3,7 @@ use nostr_sdk::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::io::Read;
 use std::sync::mpsc::{channel, Receiver};
-use std::thread;
+use tokio::task;
 use toml;
 
 const CONFIGSTR: &str = "./Config.toml";
@@ -43,7 +43,8 @@ async fn main() -> Result<()> {
     let npubs = get_npubs(&config.comms.npubs);
     let admins = get_admins(&config.comms.npubs);
     let client = Client::new(keys.clone());
-    add_relays(&client, &config.comms.relays).await.unwrap();
+    // add_relays(&client, &config.comms.relays).await.unwrap();
+    client.add_relay("ws://localhost:7000").await?;
     client.connect().await;
 
     // verify we have announced
@@ -51,6 +52,7 @@ async fn main() -> Result<()> {
         announce_me(&config, &client).await;
         config.package.announced = true;
         save_config(&config);
+        println!("Announced!");
     }
 
     println!("Find me at: {}", keys.public_key().to_bech32()?);
@@ -60,7 +62,11 @@ async fn main() -> Result<()> {
         .authors(npubs)
         .kind(Kind::TextNote)
         .since(Timestamp::min());
-    let sub_dvmreq = Filter::new().kind(DVM_REQ).since(Timestamp::now());
+    let sub_dvmreq = Filter::new()
+        .kind(DVM_REQ)
+        // .pubkey(keys.public_key())
+        // .since(Timestamp::now() - 60000);
+        .since(Timestamp::min());
     // todo: Verify DM decrypting
     // let sub_admin = Filter::new()
     //     .authors(admins.clone())
@@ -74,14 +80,15 @@ async fn main() -> Result<()> {
     // Setup background thread for processing received events
     let (sender, receiver) = channel::<Event>();
     let c = client.clone();
-    thread::spawn(move || {
-        handle_events(receiver, admins, c);
-    });
+    task::spawn(handle_events(receiver, admins, c));
 
     // Wait for events to come in
     client
         .handle_notifications(|notification| async {
             if let RelayPoolNotification::Event { event, .. } = notification {
+                if event.kind != Kind::TextNote {
+                    println!("{event:?}");
+                }
                 sender.send(*event).unwrap();
             }
             Ok(false) // Set to true to exit from the loop
@@ -95,14 +102,14 @@ async fn main() -> Result<()> {
 /// Shuffle received events to proper function.
 /// Update event list with TextNotes, Send DVM_RESP when we get a REQ,
 /// and handle admin DMs
-fn handle_events(receiver: Receiver<Event>, _admins: Vec<PublicKey>, client: Client) {
+async fn handle_events(receiver: Receiver<Event>, _admins: Vec<PublicKey>, client: Client) {
     println!("Waiting for events");
     let mut events: Vec<Event> = Vec::new();
     loop {
         let ev = receiver.recv().unwrap();
         match ev.kind {
-            Kind::TextNote => update_event_list(&mut events, ev, &client),
-            Kind::Custom(5300) => send_resp(ev, &client),
+            Kind::TextNote => update_event_list(&mut events, ev),
+            Kind::JobRequest(5300) => send_resp(ev, &client, &events).await,
             Kind::PrivateDirectMessage => handle_cmd(ev, &client),
             Kind::EncryptedDirectMessage => handle_cmd(ev, &client),
             _ => (),
@@ -111,18 +118,31 @@ fn handle_events(receiver: Receiver<Event>, _admins: Vec<PublicKey>, client: Cli
 }
 
 /// Send a 6300 after getting a 5300, referencing the request job
-fn send_resp(event: Event, client: &Client) {
-    // reference event ID e
-    // reference pubkey p
-    // status: success
-    // alt: result of DVM
+async fn send_resp(event: Event, client: &Client, events: &Vec<Event>) {
     // relays: relays used
-    // content: list of [e, [eid]]
+    let eventlist = events
+        .iter()
+        .map(|e| format!("[\"e\", \"{}\"]", e.id.to_string()))
+        .collect::<Vec<String>>();
+    let eventlist = eventlist.join(",");
+    let eventlist = format!("[{eventlist}]");
+    let signer = client.signer().await.unwrap();
+    let etag = Tag::parse(["e", &event.id.to_string()]).unwrap();
+    let ptag = Tag::parse(["p", &event.pubkey.to_bech32().unwrap()]).unwrap();
+    let stag = Tag::parse(["status", "success"]).unwrap();
+    let alttag = Tag::parse(["alt", "MN DVM Result"]).unwrap();
+    let ev = EventBuilder::new(DVM_RESP, &eventlist)
+        .tags([etag, ptag, stag, alttag])
+        .sign(&signer)
+        .await
+        .unwrap();
+    client.send_event(ev).await.unwrap();
+    println!("Sent response");
 }
 
 /// Adds an event to the list if it is not present yet.
 /// Uses a simple time based ordering
-fn update_event_list(list: &mut Vec<Event>, event: Event, client: &Client) {
+fn update_event_list(list: &mut Vec<Event>, event: Event) {
     if !list.contains(&event) {
         list.push(event);
         list.sort_by(|a, b| {
