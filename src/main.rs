@@ -34,6 +34,17 @@ struct Comms {
     npubs: Vec<String>,
 }
 
+fn set_followlist(config: &Config) -> EventBuilder {
+    let mut tags = Vec::new();
+    config.comms.npubs.iter().for_each(|n| {
+        let pk = PublicKey::parse(n).unwrap();
+        let tag: Tag = Tag::from_standardized(TagStandard::public_key(pk));
+        tags.push(tag);
+    });
+    let event = EventBuilder::new(Kind::ContactList, "").tags(tags);
+    event
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     // get config
@@ -43,9 +54,13 @@ async fn main() -> Result<()> {
     let npubs = get_npubs(&config.comms.npubs);
     let admins = get_admins(&config.comms.npubs);
     let client = Client::new(keys.clone());
-    // add_relays(&client, &config.comms.relays).await.unwrap();
-    client.add_relay("ws://localhost:7000").await?;
+    add_relays(&client, &config.comms.relays).await.unwrap();
+    // client.add_relay("ws://localhost:7000").await?;
     client.connect().await;
+
+    let event = set_followlist(&config);
+    client.send_event_builder(event).await.unwrap();
+    println!("Find me at: {}", keys.public_key().to_bech32()?);
 
     // verify we have announced
     if !config.package.announced {
@@ -55,8 +70,6 @@ async fn main() -> Result<()> {
         println!("Announced!");
     }
 
-    println!("Find me at: {}", keys.public_key().to_bech32()?);
-
     // Generate filters for subscriptions
     let sub_notes = Filter::new()
         .authors(npubs)
@@ -64,9 +77,9 @@ async fn main() -> Result<()> {
         .since(Timestamp::min());
     let sub_dvmreq = Filter::new()
         .kind(DVM_REQ)
-        // .pubkey(keys.public_key())
-        // .since(Timestamp::now() - 60000);
-        .since(Timestamp::min());
+        .pubkey(keys.public_key())
+        .since(Timestamp::now());
+
     // todo: Verify DM decrypting
     // let sub_admin = Filter::new()
     //     .authors(admins.clone())
@@ -128,7 +141,7 @@ async fn send_resp(event: Event, client: &Client, events: &Vec<Event>) {
     let eventlist = format!("[{eventlist}]");
     let signer = client.signer().await.unwrap();
     let etag = Tag::parse(["e", &event.id.to_string()]).unwrap();
-    let ptag = Tag::parse(["p", &event.pubkey.to_bech32().unwrap()]).unwrap();
+    let ptag = Tag::parse(["p", &event.pubkey.to_hex()]).unwrap();
     let stag = Tag::parse(["status", "success"]).unwrap();
     let alttag = Tag::parse(["alt", "MN DVM Result"]).unwrap();
     let ev = EventBuilder::new(DVM_RESP, &eventlist)
@@ -149,7 +162,7 @@ fn update_event_list(list: &mut Vec<Event>, event: Event) {
             if a.created_at == b.created_at {
                 a.id.cmp(&b.id)
             } else {
-                a.created_at.cmp(&b.created_at)
+                b.created_at.cmp(&a.created_at)
             }
         });
         while list.len() > 200 {
@@ -174,7 +187,7 @@ async fn announce_me(config: &Config, client: &Client) {
         .tags([tag_k, tag_d])
         .sign(&signer);
     let ev = ev.await.unwrap();
-    client.send_event(ev).await;
+    client.send_event(ev).await.unwrap();
 }
 fn get_config() -> Config {
     let mut f = std::fs::File::open(CONFIGSTR).unwrap();
