@@ -1,7 +1,7 @@
 [package]
 name = "MN_DVM"
 about = "A DVM for highlighting the MN nostr community"
-lnurl = "bravecheeta9@primal.net"
+lnurl = "bravecheetah9@primal.net"
 # If nsec isn't present, a new nsec will be generated
 # DANGER: Do not commit your real nsec
 nsec = "3bd0a7f5ab788d086dd2fea661916597ff1c251e028a25fcbaea2a3f531f08d5"
