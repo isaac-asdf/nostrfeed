@@ -177,6 +177,14 @@ fn handle_cmd(_event: Event, _client: &Client) {
 }
 
 async fn announce_me(config: &Config, client: &Client) {
+    // set metadata
+    let md = Metadata::new()
+        .name(&config.package.name)
+        .lud06(&config.package.lnurl)
+        .about(&config.package.about);
+    client.set_metadata(&md).await.unwrap();
+
+    // announce DVM
     use serde_json::json;
     let content = json!({"name": config.package.name, "about" : config.package.about, "encryptionSupported": false})
         .to_string();
