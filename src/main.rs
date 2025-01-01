@@ -162,6 +162,7 @@ fn update_event_list(list: &mut Vec<Event>, event: Event) {
             if a.created_at == b.created_at {
                 a.id.cmp(&b.id)
             } else {
+                // sort timestamps in descending order (ie, earlier notes show at front)
                 b.created_at.cmp(&a.created_at)
             }
         });
