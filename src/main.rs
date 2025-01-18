@@ -3,6 +3,7 @@ use nostr_sdk::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::io::Read;
 use std::sync::mpsc::{channel, Receiver};
+use std::time::Duration;
 use tokio::task;
 use toml;
 
@@ -55,11 +56,10 @@ async fn main() -> Result<()> {
     let admins = get_admins(&config.comms.npubs);
     let client = Client::new(keys.clone());
     add_relays(&client, &config.comms.relays).await.unwrap();
-    // client.add_relay("ws://localhost:7000").await?;
     client.connect().await;
 
-    let event = set_followlist(&config);
-    client.send_event_builder(event).await.unwrap();
+    // let event = set_followlist(&config);
+    // client.send_event_builder(event).await.unwrap();
     println!("Find me at: {}", keys.public_key().to_bech32()?);
 
     // verify we have announced
@@ -94,6 +94,7 @@ async fn main() -> Result<()> {
     let (sender, receiver) = channel::<Event>();
     let c = client.clone();
     task::spawn(handle_events(receiver, admins, c));
+    task::spawn(keep_alive_poll(client.clone(), keys.public_key().to_hex()));
 
     // Wait for events to come in
     client
@@ -110,6 +111,18 @@ async fn main() -> Result<()> {
         .unwrap();
 
     Ok(())
+}
+
+async fn keep_alive_poll(client: Client, pubkey: String) {
+    loop {
+        std::thread::sleep(Duration::from_secs(60));
+        let req =
+            EventBuilder::new(Kind::JobRequest(5300), "").tag(Tag::custom(TagKind::p(), [&pubkey]));
+        match client.send_event_builder(req).await {
+            Ok(_) => println!("Heartbeat detected!"),
+            Err(_) => println!("Heartbeat stopped!"),
+        }
+    }
 }
 
 /// Shuffle received events to proper function.
@@ -198,6 +211,7 @@ async fn announce_me(config: &Config, client: &Client) {
     let ev = ev.await.unwrap();
     client.send_event(ev).await.unwrap();
 }
+
 fn get_config() -> Config {
     let mut f = std::fs::File::open(CONFIGSTR).unwrap();
     let mut filestr = String::new();
